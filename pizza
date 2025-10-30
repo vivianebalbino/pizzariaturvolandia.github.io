@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pizzaria — Pedido via WhatsApp</title>
+  <style>
+    :root{--accent:#d9534f;--muted:#666}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;margin:0;padding:0;background:#fff}
+    header{background:linear-gradient(90deg,#fff 0,#fff 60%),#111;padding:18px 16px;color:#fff;display:flex;justify-content:space-between;align-items:center}
+    .cart-icon{position:relative;cursor:pointer}
+    .cart-count{position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;border-radius:50%;padding:2px 6px;font-size:12px}
+    .container{max-width:980px;margin:20px auto;padding:16px}
+    h1{margin:0 0 6px;font-size:20px}
+    p.lead{margin:0;color:#ddd;font-size:13px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:18px}
+    .card{border:1px solid #eee;padding:12px;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+    .card h3{margin:0 0 8px;font-size:16px}
+    .meta{font-size:13px;color:var(--muted);margin-bottom:8px}
+    .row{display:flex;gap:8px;align-items:center}
+    select,input[type=number]{flex:1;padding:8px;border-radius:6px;border:1px solid #ddd}
+    button{background:var(--accent);color:#fff;border:none;padding:10px 12px;border-radius:8px;cursor:pointer}
+    .cart{position:sticky;top:16px}
+    ul{list-style:none;padding:0;margin:0}
+    li.item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #eee}
+    .small{font-size:13px;color:var(--muted)}
+    footer{padding:18px;text-align:center;color:#666;font-size:13px}
+    @media (max-width:520px){header{padding:12px} .container{margin:10px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Pizzaria do Bairro</h1>
+      <p class="lead">Escolha sua pizza e envie o pedido direto pelo WhatsApp.</p>
+    </div>
+    <div class="cart-icon" id="cartIcon">
+      🛒<span class="cart-count" id="cartCount">0</span>
+    </div>
+  </header>
+  <main class="container">
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:18px">
+      <section>
+        <div class="grid" id="menu"></div>
+      </section>
+
+      <aside class="cart card" id="cartPanel" style="display:none;">
+        <h3>Carrinho</h3>
+        <div id="cart-list"><p class="small">Nenhum item ainda.</p></div>
+        <div style="margin-top:12px">
+          <div class="row" style="margin-bottom:8px">
+            <label class="small">Nome do cliente</label>
+          </div>
+          <input id="customerName" placeholder="Seu nome (opcional)" />
+        </div>
+        <div style="margin-top:12px" class="small">Telefone do estabelecimento (edite no código):<br><strong id="phone-note">+55XXXXXXXXXXX</strong></div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button id="sendWA">Enviar pelo WhatsApp</button>
+          <button id="clear" style="background:#888">Limpar</button>
+        </div>
+        <p class="small" style="margin-top:10px">Observação: o botão abre o WhatsApp com a mensagem pronta. Substitua o número no código pelo seu número com DDI e DDD (ex: +5511999887766).</p>
+      </aside>
+    </div>
+
+    <template id="pizzaTpl">
+      <div class="card">
+        <h3 class="title"></h3>
+        <div class="meta">Tamanhos e preços</div>
+        <div class="row" style="margin-top:6px">
+          <select class="size"></select>
+          <input type="number" min="1" value="1" class="qty" style="width:72px" />
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button class="add">Adicionar</button>
+          <button class="details" style="background:#777">Info</button>
+        </div>
+      </div>
+    </template>
+
+  </main>
+  <footer>
+    Pizzaria — App simples em HTML/JS. Salve como <code>pizzaria.html</code> e hospede (GitHub Pages / Netlify Drop) para compartilhar o link.
+  </footer>
+
+  <script>
+    const BUSINESS_PHONE = '+5511980828522';
+
+    const PIZZAS = [
+      { id:1, name:'Margherita', desc:'Massa fina, molho de tomate, muçarela e manjericão', sizes:[{label:'P',price:29.9},{label:'M',price:39.9},{label:'G',price:49.9}] },
+      { id:2, name:'Pepperoni', desc:'Molho, muçarela e pepperoni artesanal', sizes:[{label:'P',price:34.9},{label:'M',price:44.9},{label:'G',price:54.9}] },
+      { id:3, name:'Calabresa', desc:'Calabresa fatiada, cebola e azeitonas', sizes:[{label:'P',price:33.9},{label:'M',price:43.9},{label:'G',price:53.9}] },
+      { id:4, name:'Quatro Queijos', desc:'Muçarela, provolone, parmesão e gorgonzola', sizes:[{label:'P',price:36.9},{label:'M',price:46.9},{label:'G',price:56.9}] }
+    ];
+
+    const menuEl = document.getElementById('menu');
+    const tpl = document.getElementById('pizzaTpl');
+    const cart = [];
+
+    function formatBRL(v){ return v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+
+    function renderMenu(){
+      PIZZAS.forEach(p => {
+        const node = tpl.content.cloneNode(true);
+        node.querySelector('.title').textContent = p.name;
+        node.querySelector('.meta').textContent = p.desc;
+        const sel = node.querySelector('.size');
+        p.sizes.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = JSON.stringify(s);
+          opt.textContent = `${s.label} — ${formatBRL(s.price)}`;
+          sel.appendChild(opt);
+        });
+        node.querySelector('.add').addEventListener('click', (e) => {
+          const card = e.target.closest('.card');
+          const sel = card.querySelector('.size');
+          const qtyEl = card.querySelector('.qty');
+          if (!sel || !qtyEl) return alert('Erro ao localizar tamanho ou quantidade.');
+
+          const size = JSON.parse(sel.value);
+          const qty = parseInt(qtyEl.value) || 1;
+          addToCart(p, size, qty);
+        });
+        node.querySelector('.details').addEventListener('click', () => alert(p.desc));
+        menuEl.appendChild(node);
+      });
+    }
+
+    function addToCart(pizza, size, qty){
+      const existing = cart.find(i=>i.pizzaId===pizza.id && i.size.label===size.label);
+      if(existing){ existing.qty += qty; }
+      else{ cart.push({pizzaId:pizza.id,name:pizza.name,size,qty,price:size.price}); }
+      renderCart();
+    }
+
+    function renderCart(){
+      const el = document.getElementById('cart-list');
+      el.innerHTML = '';
+      if(cart.length===0){ el.innerHTML='<p class="small">Nenhum item ainda.</p>'; document.getElementById('cartCount').textContent = 0; return }
+      const ul = document.createElement('ul');
+      let total = 0;
+      cart.forEach((it,idx)=>{
+        const li = document.createElement('li'); li.className='item';
+        const left = document.createElement('div'); left.innerHTML = `<strong>${it.name} (${it.size.label})</strong><div class="small">${it.qty} x ${formatBRL(it.price)}</div>`;
+        const right = document.createElement('div'); right.innerHTML = `<div>${formatBRL(it.qty*it.price)}</div><div class="small"><button data-idx="${idx}" style="background:transparent;color:var(--accent);border:none;cursor:pointer">Remover</button></div>`;
+        li.appendChild(left); li.appendChild(right); ul.appendChild(li);
+        total += it.qty*it.price;
+      });
+      const t = document.createElement('div'); t.style.marginTop='10px'; t.innerHTML = `<strong>Total: ${formatBRL(total)}</strong>`;
+      el.appendChild(ul); el.appendChild(t);
+      document.getElementById('cartCount').textContent = cart.reduce((a,b)=>a+b.qty,0);
+
+      el.querySelectorAll('button[data-idx]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const i = parseInt(btn.dataset.idx);
+          cart.splice(i,1);
+          renderCart();
+        });
+      });
+    }
+
+    document.getElementById('clear').addEventListener('click', ()=>{ cart.length=0; renderCart(); });
+
+    document.getElementById('sendWA').addEventListener('click', ()=>{
+      if(cart.length===0){ alert('Adicione pelo menos uma pizza ao carrinho.'); return }
+      const name = document.getElementById('customerName').value.trim();
+      let msg = 'Pedido%20de%20pizzas%20-%20Pizzaria%20do%20Bairro%5Cn';
+      if(name) msg += encodeURIComponent('\nCliente: ' + name + '\n');
+      let total = 0;
+      cart.forEach(it=>{
+        const line = `${it.qty} x ${it.name} (${it.size.label}) - R$ ${it.qty*it.price}`;
+        msg += encodeURIComponent('\n' + line);
+        total += it.qty*it.price;
+      });
+      msg += encodeURIComponent('\n\nTotal: R$ ' + total.toFixed(2));
+      msg += encodeURIComponent('\n\nEndereco ou observacoes: ');
+
+      const phone = BUSINESS_PHONE.replace(/\s/g,'');
+      if(!phone || phone.includes('X')){
+        alert('Substitua BUSINESS_PHONE no código pelo telefone do estabelecimento (ex: +5511999887766) antes de enviar.');
+        return;
+      }
+      const waUrl = `https://wa.me/${phone.replace('+','')}?text=${msg}`;
+      window.open(waUrl, '_blank');
+    });
+
+    document.getElementById('cartIcon').addEventListener('click', ()=>{
+      const panel = document.getElementById('cartPanel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('phone-note').textContent = BUSINESS_PHONE;
+    renderMenu();
+    renderCart();
+  </script>
+</body>
+</html>
